@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 
 st.title("MCR Calculator")
@@ -21,21 +24,28 @@ def load_data():
     })
     return df
 
-
 df = load_data()
 
 # -----------------------------
-# Train the regression model
+# Train Random Forest model
 # -----------------------------
-@st.cache_resource
-def train_model(df):
-    X = df[["Angle", "Ds", "Dv", "Ratio"]]
-    y = df["MCR"]
-    model = RandomForestRegressor(n_estimators=500, random_state=42)
-    model.fit(X, y)
-    return model
+X_rf = df[["Angle", "Ds", "Dv", "Ratio"]]
+y_rf = df["MCR"]
 
-model = train_model(df)
+rf_model = RandomForestRegressor(n_estimators=500, random_state=42)
+rf_model.fit(X_rf, y_rf)
+
+# -----------------------------
+# Train Quadratic Regression model
+# -----------------------------
+X_quad = df[["Angle", "Ratio"]]
+y_quad = df["MCR"]
+
+poly = PolynomialFeatures(degree=2, include_bias=False)
+X_quad_transformed = poly.fit_transform(X_quad)
+
+quad_model = LinearRegression()
+quad_model.fit(X_quad_transformed, y_quad)
 
 # -----------------------------
 # UI Inputs
@@ -48,69 +58,85 @@ ratio = Ds / Dv
 st.write(f"Computed Ds/Dv ratio: {ratio:.2f}")
 
 # -----------------------------
-# Predict MCR
+# Predict MCR using Quadratic Model
 # -----------------------------
 if st.button("Calculate MCR"):
-    X_new = np.array([[angle, Ds, Dv, ratio]])
-    mcr_pred = model.predict(X_new)[0]
-    st.success(f"Predicted MCR: {mcr_pred:.2f}%")
+    quad_input = poly.transform([[angle, ratio]])
+    mcr_pred = quad_model.predict(quad_input)[0]
 
-import plotly.express as px
+    st.session_state.mcr_pred = mcr_pred
+    st.session_state.angle = angle
+    st.session_state.ratio = ratio
 
-st.subheader("3D Visualization: Angle vs Ds/Dv vs MCR")
+    st.success(f"Predicted MCR (Quadratic Fit): {mcr_pred:.2f}%")
 
-fig = px.scatter_3d(
-    df,
-    x="Angle",
-    y="Ratio",
-    z="MCR",
-    color="Dv",   # you can change this to "Region" if you prefer
-    title="3D Plot of Angle, Ds/Dv Ratio, and MCR",
-    height=650
-)
+# -----------------------------
+# 3D Surface using Random Forest model
+# -----------------------------
+st.subheader("3D Model Surface (Random Forest)")
 
-st.plotly_chart(fig)
-
-import plotly.graph_objects as go
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LinearRegression
-
-st.subheader("3D Quadratic Surface: Angle vs Ds/Dv vs MCR")
-
-# Extract variables
-X = df[["Angle", "Ratio"]]
-y = df["MCR"]
-
-# Create quadratic features
-poly = PolynomialFeatures(degree=2, include_bias=False)
-X_quad = poly.fit_transform(X)
-
-# Fit quadratic regression
-quad_model = LinearRegression()
-quad_model.fit(X_quad, y)
-
-# Create grid for surface
 angle_vals = np.linspace(df["Angle"].min(), df["Angle"].max(), 40)
 ratio_vals = np.linspace(df["Ratio"].min(), df["Ratio"].max(), 40)
 A, R = np.meshgrid(angle_vals, ratio_vals)
 
-# Prepare grid for prediction
-grid = np.column_stack([A.ravel(), R.ravel()])
-grid_quad = poly.transform(grid)
+grid_full = np.column_stack([
+    A.ravel(),
+    np.full(A.size, Ds),
+    np.full(A.size, Dv),
+    R.ravel()
+])
 
-# Predict MCR on grid
-Z = quad_model.predict(grid_quad).reshape(A.shape)
+Z_rf = rf_model.predict(grid_full).reshape(A.shape)
 
-# Plot surface
 fig = go.Figure(data=[go.Surface(
     x=A,
     y=R,
-    z=Z,
-    colorscale="Viridis"
+    z=Z_rf,
+    colorscale="Viridis",
+    colorbar=dict(title="MCR (%)")
 )])
 
 fig.update_layout(
-    title="Quadratic Fit Surface",
+    title="Random Forest Model Surface",
+    scene=dict(
+        xaxis_title="Angle (degrees)",
+        yaxis_title="Ds/Dv Ratio",
+        zaxis_title="MCR"
+    ),
+    height=700
+)
+
+st.plotly_chart(fig)
+
+# -----------------------------
+# 3D Quadratic Surface (Prediction Model)
+# -----------------------------
+st.subheader("3D Quadratic Surface: Angle vs Ds/Dv vs MCR")
+
+grid_quad = poly.transform(np.column_stack([A.ravel(), R.ravel()]))
+Z_quad = quad_model.predict(grid_quad).reshape(A.shape)
+
+fig = go.Figure(data=[go.Surface(
+    x=A,
+    y=R,
+    z=Z_quad,
+    colorscale="Viridis",
+    colorbar=dict(title="MCR (%)")
+)])
+
+# Add the user's predicted point
+if "mcr_pred" in st.session_state:
+    fig.add_trace(go.Scatter3d(
+        x=[st.session_state.angle],
+        y=[st.session_state.ratio],
+        z=[st.session_state.mcr_pred],
+        mode="markers",
+        marker=dict(size=8, color="red"),
+        name="Your MCR"
+    ))
+
+fig.update_layout(
+    title="Quadratic Fit Surface (Prediction Model)",
     scene=dict(
         xaxis_title="Angle (degrees)",
         yaxis_title="Ds/Dv Ratio",
