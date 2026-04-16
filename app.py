@@ -58,17 +58,32 @@ ratio = Ds / Dv
 st.write(f"Computed Ds/Dv ratio: {ratio:.2f}")
 
 # -----------------------------
-# Predict MCR using Quadratic Model
+# Model selection
+# -----------------------------
+model_choice = st.radio(
+    "Choose prediction model:",
+    ["Quadratic Fit", "Random Forest"]
+)
+
+# -----------------------------
+# Predict MCR using selected model
 # -----------------------------
 if st.button("Calculate MCR"):
-    quad_input = poly.transform([[angle, ratio]])
-    mcr_pred = quad_model.predict(quad_input)[0]
+    if model_choice == "Quadratic Fit":
+        quad_input = poly.transform([[angle, ratio]])
+        mcr_pred = quad_model.predict(quad_input)[0]
+
+    elif model_choice == "Random Forest":
+        rf_input = np.array([[angle, Ds, Dv, ratio]])
+        mcr_pred = rf_model.predict(rf_input)[0]
 
     st.session_state.mcr_pred = mcr_pred
     st.session_state.angle = angle
     st.session_state.ratio = ratio
+    st.session_state.model_choice = model_choice
 
-    st.success(f"Predicted MCR (Quadratic Fit): {mcr_pred:.2f}%")
+    st.success(f"Predicted MCR ({model_choice}): {mcr_pred:.2f}%")
+
 
 # -----------------------------
 # 3D Surface using Random Forest model
@@ -95,6 +110,18 @@ fig = go.Figure(data=[go.Surface(
     colorscale="Viridis",
     colorbar=dict(title="MCR (%)")
 )])
+
+# Add dot only if Random Forest was used
+if "mcr_pred" in st.session_state and st.session_state.model_choice == "Random Forest":
+    fig.add_trace(go.Scatter3d(
+        x=[st.session_state.angle],
+        y=[st.session_state.ratio],
+        z=[st.session_state.mcr_pred],
+        mode="markers",
+        marker=dict(size=8, color="red"),
+        name="Your MCR"
+    ))
+
 
 fig.update_layout(
     title="Random Forest Model Surface",
@@ -123,6 +150,18 @@ fig = go.Figure(data=[go.Surface(
     colorscale="Viridis",
     colorbar=dict(title="MCR (%)")
 )])
+
+# Add dot only if Quadratic Fit was used
+if "mcr_pred" in st.session_state and st.session_state.model_choice == "Quadratic Fit":
+    fig.add_trace(go.Scatter3d(
+        x=[st.session_state.angle],
+        y=[st.session_state.ratio],
+        z=[st.session_state.mcr_pred],
+        mode="markers",
+        marker=dict(size=8, color="red"),
+        name="Your MCR"
+    ))
+
 
 # Add the user's predicted point
 if "mcr_pred" in st.session_state:
